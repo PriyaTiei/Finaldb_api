@@ -12,13 +12,74 @@ function padStationNumber(station) {
 }
 
 // Function to parse the specific CSV format with metadata headers
+// async function parseCustomCSV(filePath) {
+//   return new Promise((resolve, reject) => {
+//     const rows = [];
+//     let headers = [];
+//     let isHeaderRow = false;
+//     let lineCounter = 0;
+    
+//     createReadStream(filePath)
+//       .pipe(parse({
+//         delimiter: ',',
+//         relax_quotes: true,
+//         skip_empty_lines: true
+//       }))
+//       .on('data', (row) => {
+//         lineCounter++;
+        
+//         // Skip the first three lines (metadata)
+//         if (lineCounter <= 3) {
+//           return;
+//         }
+        
+//         // The fourth line contains the column headers
+//         if (lineCounter === 4) {
+//           headers = row;
+//           isHeaderRow = true;
+//           return;
+//         }
+        
+//         // Process data rows
+//         if (isHeaderRow) {
+//           const rowData = {};
+//           headers.forEach((header, index) => {
+//             // Remove quotes from header names
+//             const cleanHeader = header.replace(/"/g, '');
+//             rowData[cleanHeader] = row[index]?.replace(/"/g, '') || '';
+//           });
+//           rows.push(rowData);
+//         }
+//       })
+//       .on('end', () => {
+//         // Extract metadata from the file
+//         const metadata = {
+//           fileInfo: {
+//             machine: 'UEC-4800', // From line 2 in the file
+//             saveDateTime: lineCounter > 2 ? rows[0]['Save date/time'] : '' // Extracted from metadata
+//           },
+//           headers: headers.map(h => h.replace(/"/g, '')),
+//           data: rows
+//         };
+        
+//         resolve(metadata);
+//       })
+//       .on('error', (err) => {
+//         reject(err);
+//       });
+//   });
+// }
+
+
+
+
 async function parseCustomCSV(filePath) {
   return new Promise((resolve, reject) => {
     const rows = [];
     let headers = [];
     let isHeaderRow = false;
     let lineCounter = 0;
-    
+
     createReadStream(filePath)
       .pipe(parse({
         delimiter: ',',
@@ -27,24 +88,23 @@ async function parseCustomCSV(filePath) {
       }))
       .on('data', (row) => {
         lineCounter++;
-        
-        // Skip the first three lines (metadata)
-        if (lineCounter <= 3) {
+
+        // Skip the first 4 lines (metadata)
+        if (lineCounter <= 4) {
           return;
         }
-        
-        // The fourth line contains the column headers
-        if (lineCounter === 4) {
+
+        // The fifth line (lineCounter = 5) contains the column headers
+        if (lineCounter === 5) {
           headers = row;
           isHeaderRow = true;
           return;
         }
-        
-        // Process data rows
+
+        // Process data rows (starting from line 6)
         if (isHeaderRow) {
           const rowData = {};
           headers.forEach((header, index) => {
-            // Remove quotes from header names
             const cleanHeader = header.replace(/"/g, '');
             rowData[cleanHeader] = row[index]?.replace(/"/g, '') || '';
           });
@@ -55,8 +115,8 @@ async function parseCustomCSV(filePath) {
         // Extract metadata from the file
         const metadata = {
           fileInfo: {
-            machine: 'UEC-4800', // From line 2 in the file
-            saveDateTime: lineCounter > 2 ? rows[0]['Save date/time'] : '' // Extracted from metadata
+            machine: 'UEC-4800', // From line 2 in the file (assuming static for now)
+            saveDateTime: lineCounter > 4 ? rows[0]['Save date/time'] : '' // Extracted from metadata
           },
           headers: headers.map(h => h.replace(/"/g, '')),
           data: rows
@@ -69,6 +129,12 @@ async function parseCustomCSV(filePath) {
       });
   });
 }
+
+
+
+
+
+
 
 // Main endpoint to fetch torque data from CSV file
 app.get('/api/torque-data', async (req, res) => {
