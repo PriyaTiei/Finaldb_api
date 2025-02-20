@@ -71,12 +71,12 @@ function padStationNumber(station) {
 // }
 
 
-
- async function parseCustomCSV(filePath) {
+async function parseCustomCSV(filePath) {
   return new Promise((resolve, reject) => {
     const rows = [];
     let headers = [];
     let lineCounter = 0;
+    let isDataStarted = false;
 
     createReadStream(filePath)
       .pipe(parse({
@@ -89,17 +89,18 @@ function padStationNumber(station) {
 
         // Skip the first 4 lines (metadata)
         if (lineCounter <= 4) {
-          return; // Skip metadata lines
+          return; // Skip metadata
         }
 
-        // Line 5 (lineCounter = 5) contains the column headers
+        // The fifth line (lineCounter = 5) contains the column headers
         if (lineCounter === 5) {
           headers = row;
+          isDataStarted = true; // Indicate that data parsing should start from this point
           return; // Skip further processing for header row
         }
 
         // Process data rows from line 6 onwards (lineCounter > 5)
-        if (lineCounter > 5) {
+        if (isDataStarted) {
           const rowData = {};
           headers.forEach((header, index) => {
             const cleanHeader = header.replace(/"/g, ''); // Clean headers if necessary
@@ -109,11 +110,11 @@ function padStationNumber(station) {
         }
       })
       .on('end', () => {
-        // Add metadata and headers in the final response
+        // Extract metadata from the file manually
         const metadata = {
           fileInfo: {
-            machine: 'UEC-4800', // From line 2 in the file (static for now)
-            saveDateTime: lineCounter > 4 ? rows[0]['Save date/time'] : '' // Extracted from metadata
+            machine: 'UEC-4800', // This is from the second line in the file, for now static
+            saveDateTime: lineCounter > 4 ? rows[0]['Save date/time'] : '' // Extract save datetime from the first data row
           },
           headers: headers.map(h => h.replace(/"/g, '')),
           data: rows
@@ -126,7 +127,6 @@ function padStationNumber(station) {
       });
   });
 }
-
 
 
 
