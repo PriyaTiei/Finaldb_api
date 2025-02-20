@@ -11,7 +11,7 @@ function padStationNumber(station) {
   return station.padStart(3, '0');
 }
 
-Function to parse the specific CSV format with metadata headers
+// Function to parse the specific CSV format with metadata headers
 async function parseCustomCSV(filePath) {
   return new Promise((resolve, reject) => {
     const rows = [];
