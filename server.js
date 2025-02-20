@@ -72,12 +72,10 @@ function padStationNumber(station) {
 
 
 
-
-async function parseCustomCSV(filePath) {
+ async function parseCustomCSV(filePath) {
   return new Promise((resolve, reject) => {
     const rows = [];
     let headers = [];
-    let isHeaderRow = false;
     let lineCounter = 0;
 
     createReadStream(filePath)
@@ -91,37 +89,36 @@ async function parseCustomCSV(filePath) {
 
         // Skip the first 4 lines (metadata)
         if (lineCounter <= 4) {
-          return;
+          return; // Skip metadata lines
         }
 
-        // The fifth line (lineCounter = 5) contains the column headers
+        // Line 5 (lineCounter = 5) contains the column headers
         if (lineCounter === 5) {
           headers = row;
-          isHeaderRow = true;
-          return;
+          return; // Skip further processing for header row
         }
 
-        // Process data rows (starting from line 6)
-        if (isHeaderRow) {
+        // Process data rows from line 6 onwards (lineCounter > 5)
+        if (lineCounter > 5) {
           const rowData = {};
           headers.forEach((header, index) => {
-            const cleanHeader = header.replace(/"/g, '');
-            rowData[cleanHeader] = row[index]?.replace(/"/g, '') || '';
+            const cleanHeader = header.replace(/"/g, ''); // Clean headers if necessary
+            rowData[cleanHeader] = row[index]?.replace(/"/g, '') || ''; // Handle missing or empty values
           });
           rows.push(rowData);
         }
       })
       .on('end', () => {
-        // Extract metadata from the file
+        // Add metadata and headers in the final response
         const metadata = {
           fileInfo: {
-            machine: 'UEC-4800', // From line 2 in the file (assuming static for now)
+            machine: 'UEC-4800', // From line 2 in the file (static for now)
             saveDateTime: lineCounter > 4 ? rows[0]['Save date/time'] : '' // Extracted from metadata
           },
           headers: headers.map(h => h.replace(/"/g, '')),
           data: rows
         };
-        
+
         resolve(metadata);
       })
       .on('error', (err) => {
@@ -129,6 +126,7 @@ async function parseCustomCSV(filePath) {
       });
   });
 }
+
 
 
 
