@@ -12,56 +12,122 @@ function padStationNumber(station) {
 }
 
 // Function to parse the specific CSV format with metadata headers
+// async function parseCustomCSV(filePath) {
+//   return new Promise((resolve, reject) => {
+//     const rows = [];
+//     let headers = [];
+//     let isHeaderRow = false;
+//     let lineCounter = 0;
+    
+//     createReadStream(filePath)
+//       .pipe(parse({
+//         delimiter: ',',
+//         relax_quotes: true,
+//         skip_empty_lines: true
+//       }))
+//       .on('data', (row) => {
+//         lineCounter++;
+        
+//         // Skip the first three lines (metadata)
+//         if (lineCounter <= 3) {
+//           return;
+//         }
+        
+//         // The fourth line contains the column headers
+//         if (lineCounter === 4) {
+//           headers = row;
+//           isHeaderRow = true;
+//           return;
+//         }
+        
+//         // Process data rows
+//         if (isHeaderRow) {
+//           const rowData = {};
+//           headers.forEach((header, index) => {
+//             // Remove quotes from header names
+//             const cleanHeader = header.replace(/"/g, '');
+//             rowData[cleanHeader] = row[index]?.replace(/"/g, '') || '';
+//           });
+//           rows.push(rowData);
+//         }
+//       })
+//       .on('end', () => {
+//         // Extract metadata from the file
+//         const metadata = {
+//           fileInfo: {
+//             machine: 'UEC-4800', // From line 2 in the file
+//             saveDateTime: lineCounter > 2 ? rows[0]['Save date/time'] : '' // Extracted from metadata
+//           },
+//           headers: headers.map(h => h.replace(/"/g, '')),
+//           data: rows
+//         };
+        
+//         resolve(metadata);
+//       })
+//       .on('error', (err) => {
+//         reject(err);
+//       });
+//   });
+// }
+
+
+
 async function parseCustomCSV(filePath) {
   return new Promise((resolve, reject) => {
     const rows = [];
     let headers = [];
-    let isHeaderRow = false;
+    let metadata = {
+      fileInfo: {
+        machine: 'UEC-4800',
+        saveDateTime: ''
+      }
+    };
     let lineCounter = 0;
     
     createReadStream(filePath)
       .pipe(parse({
         delimiter: ',',
         relax_quotes: true,
-        skip_empty_lines: true
+        skip_empty_lines: true,
+        relax_column_count: true  // This is the key fix - allow rows to have different numbers of columns
       }))
       .on('data', (row) => {
         lineCounter++;
         
-        // Skip the first three lines (metadata)
-        if (lineCounter <= 3) {
+        // Extract metadata from first three lines
+        if (lineCounter === 1) {
+          // First line metadata - can be ignored or stored
+          return;
+        }
+        if (lineCounter === 2) {
+          // Second line contains machine info
+          metadata.fileInfo.machine = row[0]?.replace(/"/g, '') || 'UEC-4800';
+          return;
+        }
+        if (lineCounter === 3) {
+          // Third line contains save date/time
+          metadata.fileInfo.saveDateTime = row[0]?.replace(/"/g, '') || '';
           return;
         }
         
         // The fourth line contains the column headers
         if (lineCounter === 4) {
-          headers = row;
-          isHeaderRow = true;
+          headers = row.map(h => h.replace(/"/g, ''));
           return;
         }
         
-        // Process data rows
-        if (isHeaderRow) {
+        // Process data rows (line 5 and beyond)
+        if (lineCounter > 4) {
           const rowData = {};
           headers.forEach((header, index) => {
-            // Remove quotes from header names
-            const cleanHeader = header.replace(/"/g, '');
-            rowData[cleanHeader] = row[index]?.replace(/"/g, '') || '';
+            rowData[header] = row[index]?.replace(/"/g, '') || '';
           });
           rows.push(rowData);
         }
       })
       .on('end', () => {
-        // Extract metadata from the file
-        const metadata = {
-          fileInfo: {
-            machine: 'UEC-4800', // From line 2 in the file
-            saveDateTime: lineCounter > 2 ? rows[0]['Save date/time'] : '' // Extracted from metadata
-          },
-          headers: headers.map(h => h.replace(/"/g, '')),
-          data: rows
-        };
-        
+        metadata.headers = headers;
+        metadata.data = rows;
         resolve(metadata);
       })
       .on('error', (err) => {
@@ -69,10 +135,6 @@ async function parseCustomCSV(filePath) {
       });
   });
 }
-
-
-
-
 
 
 
