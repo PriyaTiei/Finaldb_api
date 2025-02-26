@@ -390,18 +390,18 @@ const stationMapping = {
 };
 
 // Helper function to get folder paths for a station
+
+
 function getStationFolders(station) {
   if (stationMapping[station]) {
     return stationMapping[station].map(folder => padStationNumber(folder));
   }
-  // Default behavior: use the station number itself if no mapping exists
-  return [padStationNumber(station)];
+  // Return empty array instead of using station number as fallback
+  return [];
 }
 
-// Helper function to pad station numbers with leading zeros
-function padStationNumber(station) {
-  return station.padStart(3, '0');
-}
+
+
 
 async function parseCustomCSV(filePath, folderNumber) {
   return new Promise((resolve, reject) => {
