@@ -372,7 +372,6 @@
     
 
 
-
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -390,18 +389,18 @@ const stationMapping = {
 };
 
 // Helper function to get folder paths for a station
-
-
 function getStationFolders(station) {
   if (stationMapping[station]) {
     return stationMapping[station].map(folder => padStationNumber(folder));
   }
-  // Return empty array instead of using station number as fallback
-  return [];
+  // Default behavior: use the station number itself if no mapping exists
+  return [padStationNumber(station)];
 }
 
-
-
+// Helper function to pad station numbers with leading zeros
+function padStationNumber(station) {
+  return station.padStart(3, '0');
+}
 
 async function parseCustomCSV(filePath, folderNumber) {
   return new Promise((resolve, reject) => {
@@ -476,11 +475,8 @@ app.get('/api/torque-data', async (req, res) => {
   try {
     const { station, date, time } = req.query;
     
-    console.log(`Torque data request for station: ${station}, date: ${date}`);
-    
     // Validate required parameters
     if (!station || !date) {
-      console.log('Missing parameters');
       return res.status(400).json({
         error: 'Missing required parameters. Please provide both station and date.'
       });
@@ -488,17 +484,6 @@ app.get('/api/torque-data', async (req, res) => {
     
     // Get mapped folders for the station
     const stationFolders = getStationFolders(station);
-    console.log(`Mapped folders for station ${station}:`, stationFolders);
-    
-    // Return error if station is not mapped
-    if (stationFolders.length === 0) {
-      console.log(`Station ${station} has no folder mapping`);
-      return res.status(404).json({
-        error: `Station ${station} is not configured in the mapping.`
-      });
-    }
-    
-    
     let combinedData = [];
     let foundData = false;
     let fileInfo = null;
