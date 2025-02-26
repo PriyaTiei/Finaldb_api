@@ -6,6 +6,23 @@
 // const app = express();
 // const PORT = 8121;
 
+// // Station mapping configuration
+// const stationMapping = {
+//   '1': ['27', '59'],
+//   '7': ['28', '16'],
+//   '21': ['25', '24'],
+//   // Add more mappings as needed
+// };
+
+// // Helper function to get folder paths for a station
+// function getStationFolders(station) {
+//   if (stationMapping[station]) {
+//     return stationMapping[station].map(folder => padStationNumber(folder));
+//   }
+//   // Default behavior: use the station number itself if no mapping exists
+//   return [padStationNumber(station)];
+// }
+
 // // Helper function to pad station numbers with leading zeros
 // function padStationNumber(station) {
 //   return station.padStart(3, '0');
@@ -75,9 +92,6 @@
 //   });
 // }
 
-
-
-
 // // Main endpoint to fetch torque data from CSV file
 // app.get('/api/torque-data', async (req, res) => {
 //   try {
@@ -90,63 +104,81 @@
 //       });
 //     }
     
-//     // Pad station number with leading zeros
-//     const stationFolder = padStationNumber(station);
+//     // Get mapped folders for the station
+//     const stationFolders = getStationFolders(station);
+//     let combinedData = [];
+//     let foundData = false;
+//     let fileInfo = null;
+//     let foundFile = null;
     
-//     // Construct the path to the date folder
-//     const basePath = path.join('/mnt/windows_share/Documents/DATA-28mar', stationFolder, 'UEC-4800', date);
-    
-//     // Check if path exists
-//     if (!fs.existsSync(basePath)) {
-//       return res.status(404).json({
-//         error: `Path not found. Station ${station} or date ${date} may be invalid.`
-//       });
-//     }
-    
-//     // Find F-Data CSV files
-//     const files = fs.readdirSync(basePath);
-//     const fDataFile = files.find(file => file.startsWith('F-Data') && file.endsWith('.csv'));
-    
-//     if (!fDataFile) {
-//       return res.status(404).json({
-//         error: 'No F-Data CSV files found in the specified directory.'
-//       });
-//     }
-    
-//     const csvFilePath = path.join(basePath, fDataFile);
-    
-//     // Parse the CSV file with our custom parser
-//     const parsedData = await parseCustomCSV(csvFilePath);
-    
-//     // If time is provided, filter the data to return just that record
-//     if (time) {
-//       const filteredData = parsedData.data.filter(row => 
-//         row['Tightening date/time'] && row['Tightening date/time'].includes(time)
-//       );
+//     // Iterate through all mapped folders
+//     for (const folderNumber of stationFolders) {
+//       // Construct the path to the date folder
+//       const basePath = path.join('/mnt/windows_share/Documents/DATA-28mar', folderNumber, 'UEC-4800', date);
       
-//       if (filteredData.length === 0) {
-//         return res.status(404).json({
-//           error: `No records found for the specified time: ${time}`
-//         });
+//       // Skip if path doesn't exist
+//       if (!fs.existsSync(basePath)) {
+//         continue;
 //       }
       
-//       return res.json({
-//         station,
-//         date,
-//         file: fDataFile,
-//         metadata: parsedData.fileInfo,
-//         timeFilter: time,
-//         data: filteredData
-//       });
+//       // Find F-Data CSV files
+//       const files = fs.readdirSync(basePath);
+//       const fDataFile = files.find(file => file.startsWith('F-Data') && file.endsWith('.csv'));
+      
+//       if (!fDataFile) {
+//         continue;
+//       }
+      
+//       const csvFilePath = path.join(basePath, fDataFile);
+      
+//       // Parse the CSV file with our custom parser
+//       const parsedData = await parseCustomCSV(csvFilePath);
+      
+//       // Store file info from the first valid folder
+//       if (!fileInfo) {
+//         fileInfo = parsedData.fileInfo;
+//         foundFile = fDataFile;
+//       }
+      
+//       // If time is provided, filter the data
+//       if (time) {
+//         const filteredData = parsedData.data.filter(row => 
+//           row['Tightening date/time'] && row['Tightening date/time'].includes(time)
+//         );
+        
+//         if (filteredData.length > 0) {
+//           combinedData = combinedData.concat(filteredData);
+//           foundData = true;
+//         }
+//       } else {
+//         // Add all data if no time filter
+//         combinedData = combinedData.concat(parsedData.data);
+//         foundData = true;
+//       }
 //     }
     
-//     // Return all data if no time filter is provided
+//     // Return error if no data found in any of the mapped folders
+//     if (!foundData) {
+//       if (time) {
+//         return res.status(404).json({
+//           error: `No records found for station ${station}, date ${date}, and time ${time}`
+//         });
+//       } else {
+//         return res.status(404).json({
+//           error: `No data found for station ${station} and date ${date}`
+//         });
+//       }
+//     }
+    
+//     // Return the combined data
 //     res.json({
 //       station,
 //       date,
-//       file: fDataFile,
-//       metadata: parsedData.fileInfo,
-//       data: parsedData.data
+//       file: foundFile,
+//       mappedFolders: stationFolders,
+//       metadata: fileInfo,
+//       timeFilter: time || undefined,
+//       data: combinedData
 //     });
       
 //   } catch (error) {
@@ -159,6 +191,7 @@
 // // Endpoint to get available station folders
 // app.get('/api/stations', (req, res) => {
 //   try {
+//     // Return all stations from the mapping plus any additional folders in the base directory
 //     const basePath = '/mnt/windows_share/Documents/DATA-28mar';
     
 //     // Ensure the base path exists
@@ -168,16 +201,23 @@
 //       });
 //     }
     
-//     // Get all station folders
-//     const stations = fs.readdirSync(basePath)
+//     // Get all mappable stations
+//     const mappedStations = Object.keys(stationMapping).sort((a, b) => parseInt(a) - parseInt(b));
+    
+//     // You can also include automatic discovery of directories if needed
+//     // This is optional - you might want to just use the explicit mapping
+//     const allFolders = fs.readdirSync(basePath)
 //       .filter(folder => {
 //         const folderPath = path.join(basePath, folder);
 //         return fs.statSync(folderPath).isDirectory() && /^\d+$/.test(folder);
-//       })
-//       .sort((a, b) => parseInt(a) - parseInt(b));
+//       });
+      
+//     // Create a list of all stations that have mappings
+//     const stations = [...new Set(mappedStations)];
     
 //     res.json({
-//       stations
+//       stations,
+//       stationMappings: stationMapping
 //     });
     
 //   } catch (error) {
@@ -198,29 +238,46 @@
 //       });
 //     }
     
-//     // Pad station number with leading zeros
-//     const stationFolder = padStationNumber(station);
+//     // Get mapped folders for the station
+//     const stationFolders = getStationFolders(station);
+//     let allDates = [];
+//     let foundFolder = false;
     
-//     // Construct path to UEC-4800 folder
-//     const basePath = path.join('/mnt/windows_share/Documents/DATA-28mar', stationFolder, 'UEC-4800');
+//     // Iterate through all mapped folders for this station
+//     for (const folderNumber of stationFolders) {
+//       // Construct path to UEC-4800 folder
+//       const basePath = path.join('/mnt/windows_share/Documents/DATA-28mar', folderNumber, 'UEC-4800');
+      
+//       if (!fs.existsSync(basePath)) {
+//         continue;
+//       }
+      
+//       foundFolder = true;
+      
+//       // Get all date folders from this mapped folder
+//       const dates = fs.readdirSync(basePath)
+//         .filter(folder => {
+//           const folderPath = path.join(basePath, folder);
+//           return fs.statSync(folderPath).isDirectory();
+//         });
+      
+//       // Add to the combined list of dates
+//       allDates = [...allDates, ...dates];
+//     }
     
-//     if (!fs.existsSync(basePath)) {
+//     if (!foundFolder) {
 //       return res.status(404).json({
-//         error: `Station folder ${station} not found.`
+//         error: `No folders found for station ${station}.`
 //       });
 //     }
     
-//     // Get all date folders
-//     const dates = fs.readdirSync(basePath)
-//       .filter(folder => {
-//         const folderPath = path.join(basePath, folder);
-//         return fs.statSync(folderPath).isDirectory();
-//       })
-//       .sort();
+//     // Remove duplicates and sort
+//     allDates = [...new Set(allDates)].sort();
     
 //     res.json({
 //       station,
-//       dates
+//       mappedFolders: stationFolders,
+//       dates: allDates
 //     });
     
 //   } catch (error) {
@@ -241,18 +298,78 @@
 //       });
 //     }
     
-//     // Pad station number with leading zeros
-//     const stationFolder = padStationNumber(station);
+//     // Get mapped folders for the station
+//     const stationFolders = getStationFolders(station);
+//     let allTimestamps = [];
+//     let foundFile = null;
+//     let foundData = false;
     
-//     // Construct the path to the date folder
-//     const basePath = path.join('/mnt/windows_share/Documents/DATA-28mar', stationFolder, 'UEC-4800', date);
+//     // Iterate through all mapped folders
+//     for (const folderNumber of stationFolders) {
+//       // Construct the path to the date folder
+//       const basePath = path.join('/mnt/windows_share/Documents/DATA-28mar', folderNumber, 'UEC-4800', date);
+      
+//       if (!fs.existsSync(basePath)) {
+//         continue;
+//       }
+      
+//       // Find F-Data CSV file
+//       const files = fs.readdirSync(basePath);
+//       const fDataFile = files.find(file => file.startsWith('F-Data') && file.endsWith('.csv'));
+      
+//       if (!fDataFile) {
+//         continue;
+//       }
+      
+//       if (!foundFile) {
+//         foundFile = fDataFile;
+//       }
+      
+//       const csvFilePath = path.join(basePath, fDataFile);
+      
+//       // Parse the CSV file
+//       const parsedData = await parseCustomCSV(csvFilePath);
+      
+//       // Extract timestamps from this folder
+//       const folderTimestamps = parsedData.data
+//         .map(row => row['Tightening date/time'])
+//         .filter(Boolean);
+      
+//       if (folderTimestamps.length > 0) {
+//         allTimestamps = [...allTimestamps, ...folderTimestamps];
+//         foundData = true;
+//       }
+//     }
     
-//     if (!fs.existsSync(basePath)) {
+//     if (!foundData) {
 //       return res.status(404).json({
-//         error: `Path not found. Station ${station} or date ${date} may be invalid.`
+//         error: `No timestamps found for station ${station} and date ${date}`
 //       });
 //     }
+    
+//     // Remove duplicates and sort
+//     allTimestamps = [...new Set(allTimestamps)].sort();
+    
+//     res.json({
+//       station,
+//       date,
+//       mappedFolders: stationFolders,
+//       file: foundFile,
+//       timestamps: allTimestamps
+//     });
+    
+//   } catch (error) {
+//     res.status(500).json({
+//       error: `An error occurred: ${error.message}`
+//     });
+//   }
+// });
 
+// app.listen(PORT, '0.0.0.0', () => {
+//   console.log(`Server running on port ${PORT}`);
+//   console.log(`Station mappings configured: ${JSON.stringify(stationMapping)}`);
+// });
+    
 
 
 
@@ -286,7 +403,7 @@ function padStationNumber(station) {
   return station.padStart(3, '0');
 }
 
-async function parseCustomCSV(filePath) {
+async function parseCustomCSV(filePath, folderNumber) {
   return new Promise((resolve, reject) => {
     const rows = [];
     let headers = [];
@@ -336,6 +453,10 @@ async function parseCustomCSV(filePath) {
           headers.forEach((header, index) => {
             rowData[header] = row[index]?.replace(/"/g, '') || '';
           });
+          
+          // Add the folder as a separate field
+          rowData['folder'] = folderNumber;
+          
           rows.push(rowData);
         }
       })
@@ -389,8 +510,8 @@ app.get('/api/torque-data', async (req, res) => {
       
       const csvFilePath = path.join(basePath, fDataFile);
       
-      // Parse the CSV file with our custom parser
-      const parsedData = await parseCustomCSV(csvFilePath);
+      // Parse the CSV file with our custom parser - pass the folder number to include in data
+      const parsedData = await parseCustomCSV(csvFilePath, folderNumber);
       
       // Store file info from the first valid folder
       if (!fileInfo) {
@@ -585,8 +706,8 @@ app.get('/api/timestamps', async (req, res) => {
       
       const csvFilePath = path.join(basePath, fDataFile);
       
-      // Parse the CSV file
-      const parsedData = await parseCustomCSV(csvFilePath);
+      // Parse the CSV file - include folder number
+      const parsedData = await parseCustomCSV(csvFilePath, folderNumber);
       
       // Extract timestamps from this folder
       const folderTimestamps = parsedData.data
@@ -628,42 +749,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Station mappings configured: ${JSON.stringify(stationMapping)}`);
 });
     
-//     // Find F-Data CSV file
-//     const files = fs.readdirSync(basePath);
-//     const fDataFile = files.find(file => file.startsWith('F-Data') && file.endsWith('.csv'));
-    
-//     if (!fDataFile) {
-//       return res.status(404).json({
-//         error: 'No F-Data CSV files found in the specified directory.'
-//       });
-//     }
-    
-//     const csvFilePath = path.join(basePath, fDataFile);
-    
-//     // Parse the CSV file
-//     const parsedData = await parseCustomCSV(csvFilePath);
-    
-//     // Extract unique timestamps
-//     const timestamps = [...new Set(
-//       parsedData.data
-//         .map(row => row['Tightening date/time'])
-//         .filter(Boolean)
-//     )].sort();
-    
-//     res.json({
-//       station,
-//       date,
-//       file: fDataFile,
-//       timestamps
-//     });
-    
-//   } catch (error) {
-//     res.status(500).json({
-//       error: `An error occurred: ${error.message}`
-//     });
-//   }
-// });
 
-// app.listen(PORT, '0.0.0.0', () => {
-//   console.log(`Server running on port ${PORT}`);
-// });
+
+// // app.listen(PORT, '0.0.0.0', () => {
+// //   console.log(`Server running on port ${PORT}`);
+// // });
