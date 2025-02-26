@@ -485,6 +485,14 @@ app.get('/api/torque-data', async (req, res) => {
     
     // Get mapped folders for the station
     const stationFolders = getStationFolders(station);
+    
+    // Return error if station is not mapped
+    if (stationFolders.length === 0) {
+      return res.status(404).json({
+        error: `Station ${station} is not configured in the mapping.`
+      });
+    }
+    
     let combinedData = [];
     let foundData = false;
     let fileInfo = null;
