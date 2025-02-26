@@ -476,10 +476,25 @@ app.get('/api/torque-data', async (req, res) => {
   try {
     const { station, date, time } = req.query;
     
+    console.log(`Torque data request for station: ${station}, date: ${date}`);
+    
     // Validate required parameters
     if (!station || !date) {
+      console.log('Missing parameters');
       return res.status(400).json({
         error: 'Missing required parameters. Please provide both station and date.'
+      });
+    }
+    
+    // Get mapped folders for the station
+    const stationFolders = getStationFolders(station);
+    console.log(`Mapped folders for station ${station}:`, stationFolders);
+    
+    // Return error if station is not mapped
+    if (stationFolders.length === 0) {
+      console.log(`Station ${station} has no folder mapping`);
+      return res.status(404).json({
+        error: `Station ${station} is not configured in the mapping.`
       });
     }
     
