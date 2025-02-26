@@ -393,8 +393,13 @@ function getStationFolders(station) {
   if (stationMapping[station]) {
     return stationMapping[station].map(folder => padStationNumber(folder));
   }
-  // Default behavior: use the station number itself if no mapping exists
-  return [padStationNumber(station)];
+  // Return empty array if no mapping exists - changed from default behavior
+  return [];
+}
+
+// Helper function to check if station is valid (has mapping)
+function isValidStation(station) {
+  return Object.keys(stationMapping).includes(station);
 }
 
 // Helper function to pad station numbers with leading zeros
@@ -479,6 +484,13 @@ app.get('/api/torque-data', async (req, res) => {
     if (!station || !date) {
       return res.status(400).json({
         error: 'Missing required parameters. Please provide both station and date.'
+      });
+    }
+    
+    // Check if station is valid
+    if (!isValidStation(station)) {
+      return res.status(404).json({
+        error: `Station ${station} is not valid or has no mapped folders.`
       });
     }
     
@@ -569,32 +581,11 @@ app.get('/api/torque-data', async (req, res) => {
 // Endpoint to get available station folders
 app.get('/api/stations', (req, res) => {
   try {
-    // Return all stations from the mapping plus any additional folders in the base directory
-    const basePath = '/mnt/windows_share/Documents/DATA-28mar';
-    
-    // Ensure the base path exists
-    if (!fs.existsSync(basePath)) {
-      return res.status(404).json({
-        error: 'Base path not found on server.'
-      });
-    }
-    
-    // Get all mappable stations
+    // Only return stations from the mapping, no automatic discovery
     const mappedStations = Object.keys(stationMapping).sort((a, b) => parseInt(a) - parseInt(b));
     
-    // You can also include automatic discovery of directories if needed
-    // This is optional - you might want to just use the explicit mapping
-    const allFolders = fs.readdirSync(basePath)
-      .filter(folder => {
-        const folderPath = path.join(basePath, folder);
-        return fs.statSync(folderPath).isDirectory() && /^\d+$/.test(folder);
-      });
-      
-    // Create a list of all stations that have mappings
-    const stations = [...new Set(mappedStations)];
-    
     res.json({
-      stations,
+      stations: mappedStations,
       stationMappings: stationMapping
     });
     
@@ -613,6 +604,13 @@ app.get('/api/dates', (req, res) => {
     if (!station) {
       return res.status(400).json({
         error: 'Missing required parameter: station'
+      });
+    }
+    
+    // Check if station is valid
+    if (!isValidStation(station)) {
+      return res.status(404).json({
+        error: `Station ${station} is not valid or has no mapped folders.`
       });
     }
     
@@ -673,6 +671,13 @@ app.get('/api/timestamps', async (req, res) => {
     if (!station || !date) {
       return res.status(400).json({
         error: 'Missing required parameters. Please provide both station and date.'
+      });
+    }
+    
+    // Check if station is valid
+    if (!isValidStation(station)) {
+      return res.status(404).json({
+        error: `Station ${station} is not valid or has no mapped folders.`
       });
     }
     
@@ -747,9 +752,3 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Station mappings configured: ${JSON.stringify(stationMapping)}`);
 });
-    
-
-
-// // app.listen(PORT, '0.0.0.0', () => {
-// //   console.log(`Server running on port ${PORT}`);
-// // });
