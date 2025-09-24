@@ -380,12 +380,37 @@ const { parse } = require('csv-parse');
 const app = express();
 const PORT = 8121;
 
-// Station mapping configuration
+
 const stationMapping = {
   '1': ['27', '59'],
-  '7': ['28', '16'],
+  // '7': ['28', '16','57'],
+  '7':['57'],
+  '17' : ['51', '39'],
   '21': ['25', '24'],
-  // Add more mappings as needed
+  '31' : ['21'],
+  '23' :['22','23', '26'],
+  '21' : ['24','25'],
+  '22' : ['35'],
+  '28' : ['38','16'],
+  '26' : ['60', '54', '56'],
+  '45' : ['49'],
+  '43' : ['14'],
+  '46' : ['20','29'],
+  '51':['17','58'],
+  '52':['31','34','32'],
+  '53':['36'],
+  '55': ['32','10'],
+  '56': ['41'],
+  '57': ['30'],
+  '58': ['45', '46', '55','47'],
+  '59':['42','52','53'],
+  '61':['61','58','20'],
+  '60':['48', '51','50'],
+  '62':['43','63','44'],
+  '23':['22','23','26'],
+  'Block sub assy':['1','15','18','19','40'],
+ 'Cam housing sub assy':	['5','6','7','8'],
+ 
 };
 
 // Helper function to get folder paths for a station
@@ -393,7 +418,7 @@ function getStationFolders(station) {
   if (stationMapping[station]) {
     return stationMapping[station].map(folder => padStationNumber(folder));
   }
-  // Return empty array if no mapping exists - changed from default behavior
+  
   return [];
 }
 
@@ -424,7 +449,7 @@ async function parseCustomCSV(filePath, folderNumber) {
         delimiter: ',',
         relax_quotes: true,
         skip_empty_lines: true,
-        relax_column_count: true  // This is the key fix - allow rows to have different numbers of columns
+        relax_column_count: true  
       }))
       .on('data', (row) => {
         lineCounter++;
@@ -440,12 +465,12 @@ async function parseCustomCSV(filePath, folderNumber) {
           return;
         }
         if (lineCounter === 3) {
-          // Third line contains save date/time
+            // Third line contains save date/time
           metadata.fileInfo.saveDateTime = row[0]?.replace(/"/g, '') || '';
           return;
         }
         
-        // The fourth line contains the column headers
+         // The fourth line contains the column headers
         if (lineCounter === 4) {
           headers = row.map(h => h.replace(/"/g, ''));
           return;
@@ -504,7 +529,7 @@ app.get('/api/torque-data', async (req, res) => {
     // Iterate through all mapped folders
     for (const folderNumber of stationFolders) {
       // Construct the path to the date folder
-      const basePath = path.join('/mnt/windows_share/Documents/DATA-28mar', folderNumber, 'UEC-4800', date);
+      const basePath = path.join('/mnt/torque_final/DATA-28mar', folderNumber, 'UEC-4800', date);
       
       // Skip if path doesn't exist
       if (!fs.existsSync(basePath)) {
@@ -622,7 +647,7 @@ app.get('/api/dates', (req, res) => {
     // Iterate through all mapped folders for this station
     for (const folderNumber of stationFolders) {
       // Construct path to UEC-4800 folder
-      const basePath = path.join('/mnt/windows_share/Documents/DATA-28mar', folderNumber, 'UEC-4800');
+      const basePath = path.join('/mnt/torque_final/DATA-28mar', folderNumber, 'UEC-4800');
       
       if (!fs.existsSync(basePath)) {
         continue;
@@ -690,13 +715,15 @@ app.get('/api/timestamps', async (req, res) => {
     // Iterate through all mapped folders
     for (const folderNumber of stationFolders) {
       // Construct the path to the date folder
-      const basePath = path.join('/mnt/windows_share/Documents/DATA-28mar', folderNumber, 'UEC-4800', date);
-      
+      // const basePath = path.join('/mnt/windows_share/Documents/DATA-28mar', folderNumber, 'UEC-4800', date);
+      const basePath = path.join('/mnt/torque_final/DATA-28mar', folderNumber, 'UEC-4800', date);
+
+
       if (!fs.existsSync(basePath)) {
         continue;
       }
       
-      // Find F-Data CSV file
+      // Find F-Data CSV file     
       const files = fs.readdirSync(basePath);
       const fDataFile = files.find(file => file.startsWith('F-Data') && file.endsWith('.csv'));
       
@@ -752,3 +779,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Station mappings configured: ${JSON.stringify(stationMapping)}`);
 });
+
+
+
+
