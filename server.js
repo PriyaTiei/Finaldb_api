@@ -155,7 +155,7 @@ app.get('/api/torque-data', async (req, res) => {
    
     for (const folderNumber of stationFolders) {
      
-      const basePath = path.join('/mnt/torque_final/DATA-28mar', folderNumber, 'UEC-4800', date);
+      const basePath = path.join('/mnt/torque_wrench/DATA-28mar', folderNumber, 'UEC-4800', date);
       
     
       if (!fs.existsSync(basePath)) {
@@ -272,7 +272,7 @@ app.get('/api/dates', (req, res) => {
     
     for (const folderNumber of stationFolders) {
     
-      const basePath = path.join('/mnt/torque_final/DATA-28mar', folderNumber, 'UEC-4800');
+      const basePath = path.join('/mnt/torque_wrench/DATA-28mar', folderNumber, 'UEC-4800');
       
       if (!fs.existsSync(basePath)) {
         continue;
@@ -340,7 +340,7 @@ app.get('/api/timestamps', async (req, res) => {
     
     for (const folderNumber of stationFolders) {
      
-      const basePath = path.join('/mnt/torque_final/DATA-28mar', folderNumber, 'UEC-4800', date);
+      const basePath = path.join('/mnt/torque_wrench/DATA-28mar', folderNumber, 'UEC-4800', date);
 
 
       if (!fs.existsSync(basePath)) {
