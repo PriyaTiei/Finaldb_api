@@ -10,34 +10,30 @@ const PORT = process.env.PORT || 8121;
 
 const stationMapping = {
   '1': ['27', '59'],
-  // '7': ['28', '16','57'],
-  '7':['57'],
-  '17' : ['51', '39'],
-  '21': ['25', '24'],
-  '31' : ['21'],
-  '23' :['22','23', '26'],
-  '21' : ['24','25'],
-  '22' : ['35'],
-  '28' : ['38','16'],
-  '26' : ['60', '54', '56'],
-  '45' : ['49'],
-  '43' : ['14'],
-  '46' : ['20','29'],
-  '51':['17','58'],
-  '52':['31','34','32'],
-  '53':['36'],
-  '55': ['32','10'],
+  '7': ['57'],
+  '17': ['51', '39'],
+  '21': ['24', '25'],
+  '22': ['35'],
+  '23': ['22', '23', '26'],
+  '26': ['60', '54', '56'],
+  '28': ['38', '16'],
+  '31': ['21'],
+  '43': ['14'],
+  '45': ['49'],
+  '46': ['20', '29'],
+  '51': ['17', '58'],
+  '52': ['31', '34', '32'],
+  '53': ['36'],
+  '55': ['32', '10'],
   '56': ['41'],
   '57': ['30'],
-  '58': ['45', '46', '55','47'],
-  '59':['42','52','53'],
-  '61':['61','58','20'],
-  '60':['48', '51','50'],
-  '62':['43','63','44'],
-  '23':['22','23','26'],
-  'Block sub assy':['1','15','18','19','40'],
- 'Cam housing sub assy':	['5','6','7','8'],
- 
+  '58': ['45', '46', '55', '47'],
+  '59': ['42', '52', '53'],
+  '60': ['48', '51', '50'],
+  '61': ['61', '58', '20'],
+  '62': ['43', '63', '44'],
+  'Block sub assy': ['1', '15', '18', '19', '40'],
+  'Cam housing sub assy': ['5', '6', '7', '8']
 };
 
 
@@ -154,47 +150,41 @@ app.get('/api/torque-data', async (req, res) => {
     
    
     for (const folderNumber of stationFolders) {
-     
       const basePath = path.join('/mnt/torque_wrench/DATA-28mar', folderNumber, 'UEC-4800', date);
       
-    
       if (!fs.existsSync(basePath)) {
         continue;
       }
       
-      
       const files = fs.readdirSync(basePath);
-      const fDataFile = files.find(file => file.startsWith('F-Data') && file.endsWith('.csv'));
+      const fDataFiles = files.filter(file => file.startsWith('F-Data') && file.endsWith('.csv')).sort();
       
-      if (!fDataFile) {
+      if (fDataFiles.length === 0) {
         continue;
       }
       
-      const csvFilePath = path.join(basePath, fDataFile);
-      
-      
-      const parsedData = await parseCustomCSV(csvFilePath, folderNumber);
-      
-    
-      if (!fileInfo) {
-        fileInfo = parsedData.fileInfo;
-        foundFile = fDataFile;
-      }
-      
-     
-      if (time) {
-        const filteredData = parsedData.data.filter(row => 
-          row['Tightening date/time'] && row['Tightening date/time'].includes(time)
-        );
+      for (const fDataFile of fDataFiles) {
+        const csvFilePath = path.join(basePath, fDataFile);
+        const parsedData = await parseCustomCSV(csvFilePath, folderNumber);
         
-        if (filteredData.length > 0) {
-          combinedData = combinedData.concat(filteredData);
+        if (!fileInfo) {
+          fileInfo = parsedData.fileInfo;
+          foundFile = fDataFile;
+        }
+        
+        if (time) {
+          const filteredData = parsedData.data.filter(row => 
+            row['Tightening date/time'] && row['Tightening date/time'].includes(time)
+          );
+          
+          if (filteredData.length > 0) {
+            combinedData = combinedData.concat(filteredData);
+            foundData = true;
+          }
+        } else {
+          combinedData = combinedData.concat(parsedData.data);
           foundData = true;
         }
-      } else {
-        
-        combinedData = combinedData.concat(parsedData.data);
-        foundData = true;
       }
     }
     
@@ -339,38 +329,35 @@ app.get('/api/timestamps', async (req, res) => {
     
     
     for (const folderNumber of stationFolders) {
-     
       const basePath = path.join('/mnt/torque_wrench/DATA-28mar', folderNumber, 'UEC-4800', date);
-
 
       if (!fs.existsSync(basePath)) {
         continue;
       }
       
-      // Find F-Data CSV file     
       const files = fs.readdirSync(basePath);
-      const fDataFile = files.find(file => file.startsWith('F-Data') && file.endsWith('.csv'));
+      const fDataFiles = files.filter(file => file.startsWith('F-Data') && file.endsWith('.csv')).sort();
       
-      if (!fDataFile) {
+      if (fDataFiles.length === 0) {
         continue;
       }
       
       if (!foundFile) {
-        foundFile = fDataFile;
+        foundFile = fDataFiles[0];
       }
       
-      const csvFilePath = path.join(basePath, fDataFile);
-      
-      // Parse the CSV file - include folder number
-      const parsedData = await parseCustomCSV(csvFilePath, folderNumber);
-      
-      const folderTimestamps = parsedData.data
-        .map(row => row['Tightening date/time'])
-        .filter(Boolean);
-      
-      if (folderTimestamps.length > 0) {
-        allTimestamps = [...allTimestamps, ...folderTimestamps];
-        foundData = true;
+      for (const fDataFile of fDataFiles) {
+        const csvFilePath = path.join(basePath, fDataFile);
+        const parsedData = await parseCustomCSV(csvFilePath, folderNumber);
+        
+        const folderTimestamps = parsedData.data
+          .map(row => row['Tightening date/time'])
+          .filter(Boolean);
+        
+        if (folderTimestamps.length > 0) {
+          allTimestamps = [...allTimestamps, ...folderTimestamps];
+          foundData = true;
+        }
       }
     }
     
