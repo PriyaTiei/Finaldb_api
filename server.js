@@ -1,12 +1,18 @@
 const express = require('express');
 require('dotenv').config();
 const fs = require('fs');
+const fsp = require('fs').promises;
 const path = require('path');
 const { createReadStream } = require('fs');
 const { parse } = require('csv-parse');
 const app = express();
 const PORT = process.env.PORT || 8121; 
 
+// Base data paths configuration (supports single path or comma-separated list in TORQUE_DATA_PATH)
+function getBaseDataPaths() {
+  const envPaths = process.env.TORQUE_DATA_PATH || process.env.BASE_PATH || '/mnt/torque_wrench/DATA-28mar';
+  return envPaths.split(',').map(p => p.trim()).filter(Boolean);
+}
 
 const stationMapping = {
   '1': ['27', '59'],
@@ -36,159 +42,179 @@ const stationMapping = {
   'Cam housing sub assy': ['5', '6', '7', '8']
 };
 
-
 function getStationFolders(station) {
   if (stationMapping[station]) {
     return stationMapping[station].map(folder => padStationNumber(folder));
   }
-  
   return [];
 }
 
-
 function isValidStation(station) {
-  return Object.keys(stationMapping).includes(station);
+  return Object.prototype.hasOwnProperty.call(stationMapping, station);
 }
-
 
 function padStationNumber(station) {
   return station.padStart(3, '0');
 }
 
+// In-Memory MTime Cache to avoid repeated disk reads & CSV parsing for the same files
+const fileCache = new Map();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_CACHE_ENTRIES = 300;
+
 async function parseCustomCSV(filePath, folderNumber) {
-  return new Promise((resolve, reject) => {
-    const rows = [];
-    let headers = [];
-    let metadata = {
-      fileInfo: {
-        machine: 'UEC-4800',
-        saveDateTime: ''
-      }
-    };
-    let lineCounter = 0;
-    
-    createReadStream(filePath)
-      .pipe(parse({
-        delimiter: ',',
-        relax_quotes: true,
-        skip_empty_lines: true,
-        relax_column_count: true  
-      }))
-      .on('data', (row) => {
-        lineCounter++;
-        
+  try {
+    const stats = await fsp.stat(filePath);
+    const cached = fileCache.get(filePath);
+
+    if (cached && cached.mtimeMs === stats.mtimeMs && (Date.now() - cached.cachedAt < CACHE_TTL_MS)) {
+      return cached.data;
+    }
+
+    const parsedResult = await new Promise((resolve, reject) => {
+      const rows = [];
+      let headers = [];
+      let metadata = {
+        fileInfo: {
+          machine: 'UEC-4800',
+          saveDateTime: ''
+        }
+      };
+      let lineCounter = 0;
       
-        if (lineCounter === 1) {
+      createReadStream(filePath)
+        .pipe(parse({
+          delimiter: ',',
+          relax_quotes: true,
+          skip_empty_lines: true,
+          relax_column_count: true  
+        }))
+        .on('data', (row) => {
+          lineCounter++;
           
-          return;
-        }
-        if (lineCounter === 2) {
-         
-          metadata.fileInfo.machine = row[0]?.replace(/"/g, '') || 'UEC-4800';
-          return;
-        }
-        if (lineCounter === 3) {
-            
-          metadata.fileInfo.saveDateTime = row[0]?.replace(/"/g, '') || '';
-          return;
-        }
-        
-         
-        if (lineCounter === 4) {
-          headers = row.map(h => h.replace(/"/g, ''));
-          return;
-        }
-       
-        if (lineCounter > 4) {
-          const rowData = {};
-          headers.forEach((header, index) => {
-            rowData[header] = row[index]?.replace(/"/g, '') || '';
-          });
-          
-         
-          rowData['folder'] = folderNumber;
-          
-          rows.push(rowData);
-        }
-      })
-      .on('end', () => {
-        metadata.headers = headers;
-        metadata.data = rows;
-        resolve(metadata);
-      })
-      .on('error', (err) => {
-        reject(err);
-      });
-  });
+          if (lineCounter === 1) return;
+          if (lineCounter === 2) {
+            metadata.fileInfo.machine = row[0]?.replace(/"/g, '') || 'UEC-4800';
+            return;
+          }
+          if (lineCounter === 3) {
+            metadata.fileInfo.saveDateTime = row[0]?.replace(/"/g, '') || '';
+            return;
+          }
+          if (lineCounter === 4) {
+            headers = row.map(h => h.replace(/"/g, ''));
+            return;
+          }
+          if (lineCounter > 4) {
+            const rowData = {};
+            headers.forEach((header, index) => {
+              rowData[header] = row[index]?.replace(/"/g, '') || '';
+            });
+            rowData['folder'] = folderNumber;
+            rows.push(rowData);
+          }
+        })
+        .on('end', () => {
+          metadata.headers = headers;
+          metadata.data = rows;
+          resolve(metadata);
+        })
+        .on('error', (err) => {
+          reject(err);
+        });
+    });
+
+    // Prune cache if exceeded
+    if (fileCache.size > MAX_CACHE_ENTRIES) {
+      const oldestKey = fileCache.keys().next().value;
+      fileCache.delete(oldestKey);
+    }
+
+    fileCache.set(filePath, {
+      mtimeMs: stats.mtimeMs,
+      cachedAt: Date.now(),
+      data: parsedResult
+    });
+
+    return parsedResult;
+  } catch (err) {
+    throw err;
+  }
 }
 
+async function pathExists(p) {
+  try {
+    await fsp.access(p, fs.constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 app.get('/api/torque-data', async (req, res) => {
   try {
     const { station, date, time } = req.query;
     
-   
     if (!station || !date) {
       return res.status(400).json({
         error: 'Missing required parameters. Please provide both station and date.'
       });
     }
     
-  
     if (!isValidStation(station)) {
       return res.status(404).json({
         error: `Station ${station} is not valid or has no mapped folders.`
       });
     }
     
-   
     const stationFolders = getStationFolders(station);
     let combinedData = [];
     let foundData = false;
     let fileInfo = null;
     let foundFile = null;
+    const baseDataPaths = getBaseDataPaths();
     
-   
-    for (const folderNumber of stationFolders) {
-      const basePath = path.join('/mnt/torque_wrench/DATA-28mar', folderNumber, 'UEC-4800', date);
-      
-      if (!fs.existsSync(basePath)) {
-        continue;
-      }
-      
-      const files = fs.readdirSync(basePath);
-      const fDataFiles = files.filter(file => file.startsWith('F-Data') && file.endsWith('.csv')).sort();
-      
-      if (fDataFiles.length === 0) {
-        continue;
-      }
-      
-      for (const fDataFile of fDataFiles) {
-        const csvFilePath = path.join(basePath, fDataFile);
-        const parsedData = await parseCustomCSV(csvFilePath, folderNumber);
+    for (const basePathRoot of baseDataPaths) {
+      for (const folderNumber of stationFolders) {
+        const basePath = path.join(basePathRoot, folderNumber, 'UEC-4800', date);
         
-        if (!fileInfo) {
-          fileInfo = parsedData.fileInfo;
-          foundFile = fDataFile;
+        if (!(await pathExists(basePath))) {
+          continue;
         }
         
-        if (time) {
-          const filteredData = parsedData.data.filter(row => 
-            row['Tightening date/time'] && row['Tightening date/time'].includes(time)
-          );
+        const files = await fsp.readdir(basePath);
+        const fDataFiles = files.filter(file => file.startsWith('F-Data') && file.endsWith('.csv')).sort();
+        
+        if (fDataFiles.length === 0) {
+          continue;
+        }
+        
+        for (const fDataFile of fDataFiles) {
+          const csvFilePath = path.join(basePath, fDataFile);
+          const parsedData = await parseCustomCSV(csvFilePath, folderNumber);
           
-          if (filteredData.length > 0) {
-            combinedData = combinedData.concat(filteredData);
+          if (!fileInfo) {
+            fileInfo = parsedData.fileInfo;
+            foundFile = fDataFile;
+          }
+          
+          if (time) {
+            const filteredData = parsedData.data.filter(row => 
+              row['Tightening date/time'] && row['Tightening date/time'].includes(time)
+            );
+            
+            if (filteredData.length > 0) {
+              combinedData = combinedData.concat(filteredData);
+              foundData = true;
+            }
+          } else {
+            combinedData = combinedData.concat(parsedData.data);
             foundData = true;
           }
-        } else {
-          combinedData = combinedData.concat(parsedData.data);
-          foundData = true;
         }
       }
     }
     
-   
     if (!foundData) {
       if (time) {
         return res.status(404).json({
@@ -200,7 +226,6 @@ app.get('/api/torque-data', async (req, res) => {
         });
       }
     }
-    
     
     res.json({
       station,
@@ -219,17 +244,13 @@ app.get('/api/torque-data', async (req, res) => {
   }
 });
 
-
 app.get('/api/stations', (req, res) => {
   try {
-    
     const mappedStations = Object.keys(stationMapping).sort((a, b) => parseInt(a) - parseInt(b));
-    
     res.json({
       stations: mappedStations,
       stationMappings: stationMapping
     });
-    
   } catch (error) {
     res.status(500).json({
       error: `An error occurred: ${error.message}`
@@ -237,8 +258,7 @@ app.get('/api/stations', (req, res) => {
   }
 });
 
-
-app.get('/api/dates', (req, res) => {
+app.get('/api/dates', async (req, res) => {
   try {
     const { station } = req.query;
     
@@ -248,7 +268,6 @@ app.get('/api/dates', (req, res) => {
       });
     }
     
-  
     if (!isValidStation(station)) {
       return res.status(404).json({
         error: `Station ${station} is not valid or has no mapped folders.`
@@ -258,27 +277,22 @@ app.get('/api/dates', (req, res) => {
     const stationFolders = getStationFolders(station);
     let allDates = [];
     let foundFolder = false;
+    const baseDataPaths = getBaseDataPaths();
     
-    
-    for (const folderNumber of stationFolders) {
-    
-      const basePath = path.join('/mnt/torque_wrench/DATA-28mar', folderNumber, 'UEC-4800');
-      
-      if (!fs.existsSync(basePath)) {
-        continue;
+    for (const basePathRoot of baseDataPaths) {
+      for (const folderNumber of stationFolders) {
+        const basePath = path.join(basePathRoot, folderNumber, 'UEC-4800');
+        
+        if (!(await pathExists(basePath))) {
+          continue;
+        }
+        
+        foundFolder = true;
+        const entries = await fsp.readdir(basePath, { withFileTypes: true });
+        const dates = entries.filter(e => e.isDirectory()).map(e => e.name);
+        
+        allDates = [...allDates, ...dates];
       }
-      
-      foundFolder = true;
-      
-      
-      const dates = fs.readdirSync(basePath)
-        .filter(folder => {
-          const folderPath = path.join(basePath, folder);
-          return fs.statSync(folderPath).isDirectory();
-        });
-      
-     
-      allDates = [...allDates, ...dates];
     }
     
     if (!foundFolder) {
@@ -287,7 +301,6 @@ app.get('/api/dates', (req, res) => {
       });
     }
     
-   
     allDates = [...new Set(allDates)].sort();
     
     res.json({
@@ -303,7 +316,6 @@ app.get('/api/dates', (req, res) => {
   }
 });
 
-
 app.get('/api/timestamps', async (req, res) => {
   try {
     const { station, date } = req.query;
@@ -314,49 +326,49 @@ app.get('/api/timestamps', async (req, res) => {
       });
     }
     
-  
     if (!isValidStation(station)) {
       return res.status(404).json({
         error: `Station ${station} is not valid or has no mapped folders.`
       });
     }
     
-    
     const stationFolders = getStationFolders(station);
     let allTimestamps = [];
     let foundFile = null;
     let foundData = false;
+    const baseDataPaths = getBaseDataPaths();
     
-    
-    for (const folderNumber of stationFolders) {
-      const basePath = path.join('/mnt/torque_wrench/DATA-28mar', folderNumber, 'UEC-4800', date);
+    for (const basePathRoot of baseDataPaths) {
+      for (const folderNumber of stationFolders) {
+        const basePath = path.join(basePathRoot, folderNumber, 'UEC-4800', date);
 
-      if (!fs.existsSync(basePath)) {
-        continue;
-      }
-      
-      const files = fs.readdirSync(basePath);
-      const fDataFiles = files.filter(file => file.startsWith('F-Data') && file.endsWith('.csv')).sort();
-      
-      if (fDataFiles.length === 0) {
-        continue;
-      }
-      
-      if (!foundFile) {
-        foundFile = fDataFiles[0];
-      }
-      
-      for (const fDataFile of fDataFiles) {
-        const csvFilePath = path.join(basePath, fDataFile);
-        const parsedData = await parseCustomCSV(csvFilePath, folderNumber);
+        if (!(await pathExists(basePath))) {
+          continue;
+        }
         
-        const folderTimestamps = parsedData.data
-          .map(row => row['Tightening date/time'])
-          .filter(Boolean);
+        const files = await fsp.readdir(basePath);
+        const fDataFiles = files.filter(file => file.startsWith('F-Data') && file.endsWith('.csv')).sort();
         
-        if (folderTimestamps.length > 0) {
-          allTimestamps = [...allTimestamps, ...folderTimestamps];
-          foundData = true;
+        if (fDataFiles.length === 0) {
+          continue;
+        }
+        
+        if (!foundFile) {
+          foundFile = fDataFiles[0];
+        }
+        
+        for (const fDataFile of fDataFiles) {
+          const csvFilePath = path.join(basePath, fDataFile);
+          const parsedData = await parseCustomCSV(csvFilePath, folderNumber);
+          
+          const folderTimestamps = parsedData.data
+            .map(row => row['Tightening date/time'])
+            .filter(Boolean);
+          
+          if (folderTimestamps.length > 0) {
+            allTimestamps = [...allTimestamps, ...folderTimestamps];
+            foundData = true;
+          }
         }
       }
     }
@@ -367,7 +379,6 @@ app.get('/api/timestamps', async (req, res) => {
       });
     }
     
-   
     allTimestamps = [...new Set(allTimestamps)].sort();
     
     res.json({
@@ -385,8 +396,18 @@ app.get('/api/timestamps', async (req, res) => {
   }
 });
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    basePaths: getBaseDataPaths()
+  });
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Base data paths configured: ${JSON.stringify(getBaseDataPaths())}`);
   console.log(`Station mappings configured: ${JSON.stringify(stationMapping)}`);
 });
 
