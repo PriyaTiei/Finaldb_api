@@ -8,10 +8,56 @@ const { parse } = require('csv-parse');
 const app = express();
 const PORT = process.env.PORT || 8121; 
 
-// Base data paths configuration (supports single path or comma-separated list in TORQUE_DATA_PATH)
-function getBaseDataPaths() {
-  const envPaths = process.env.TORQUE_DATA_PATH || process.env.BASE_PATH || '/mnt/torque_wrench';
-  return envPaths.split(',').map(p => p.trim()).filter(Boolean);
+async function pathExists(p) {
+  try {
+    await fsp.access(p, fs.constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// In-Memory dynamic cache for discovered data paths (5-minute TTL)
+let cachedBaseDataPaths = null;
+let lastPathsDiscoveryTime = 0;
+const PATHS_DISCOVERY_TTL_MS = 5 * 60 * 1000;
+
+// Base data paths configuration (supports single path, comma-separated list, or dynamic DATA-* subfolder discovery)
+async function getBaseDataPaths() {
+  const now = Date.now();
+  if (cachedBaseDataPaths && (now - lastPathsDiscoveryTime < PATHS_DISCOVERY_TTL_MS)) {
+    return cachedBaseDataPaths;
+  }
+
+  const rawPaths = (process.env.TORQUE_DATA_PATH || process.env.BASE_PATH || '/mnt/torque_wrench')
+    .split(',')
+    .map(p => p.trim())
+    .filter(Boolean);
+
+  const discoveredPaths = [];
+
+  for (const rootPath of rawPaths) {
+    // 1. Include root directory directly (for flat directory structures)
+    discoveredPaths.push(rootPath);
+
+    // 2. Discover any subdirectories (e.g. DATA-05-05-2025, DATA-28mar, DATA)
+    try {
+      if (await pathExists(rootPath)) {
+        const entries = await fsp.readdir(rootPath, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory() && entry.name.toUpperCase().startsWith('DATA')) {
+            discoveredPaths.push(path.join(rootPath, entry.name));
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`Warning: Could not scan root path ${rootPath}:`, err.message);
+    }
+  }
+
+  cachedBaseDataPaths = [...new Set(discoveredPaths)];
+  lastPathsDiscoveryTime = now;
+  return cachedBaseDataPaths;
 }
 
 const stationMapping = {
@@ -152,15 +198,6 @@ async function parseCustomCSV(filePath, folderNumber) {
   }
 }
 
-async function pathExists(p) {
-  try {
-    await fsp.access(p, fs.constants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 app.get('/api/torque-data', async (req, res) => {
   try {
     const { station, date, time, folder } = req.query;
@@ -182,7 +219,7 @@ app.get('/api/torque-data', async (req, res) => {
     let foundData = false;
     let fileInfo = null;
     let foundFile = null;
-    const baseDataPaths = getBaseDataPaths();
+    const baseDataPaths = await getBaseDataPaths();
     
     for (const basePathRoot of baseDataPaths) {
       for (const folderNumber of stationFolders) {
@@ -287,7 +324,7 @@ app.get('/api/dates', async (req, res) => {
     const stationFolders = getStationFolders(station, folder);
     let allDates = [];
     let foundFolder = false;
-    const baseDataPaths = getBaseDataPaths();
+    const baseDataPaths = await getBaseDataPaths();
     
     for (const basePathRoot of baseDataPaths) {
       for (const folderNumber of stationFolders) {
@@ -346,7 +383,7 @@ app.get('/api/timestamps', async (req, res) => {
     let allTimestamps = [];
     let foundFile = null;
     let foundData = false;
-    const baseDataPaths = getBaseDataPaths();
+    const baseDataPaths = await getBaseDataPaths();
     
     for (const basePathRoot of baseDataPaths) {
       for (const folderNumber of stationFolders) {
@@ -407,17 +444,18 @@ app.get('/api/timestamps', async (req, res) => {
 });
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
   res.json({
     status: 'OK',
     timestamp: new Date().toISOString(),
-    basePaths: getBaseDataPaths()
+    basePaths: await getBaseDataPaths()
   });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Base data paths configured: ${JSON.stringify(getBaseDataPaths())}`);
+  const initialPaths = await getBaseDataPaths();
+  console.log(`Base data paths configured: ${JSON.stringify(initialPaths)}`);
   console.log(`Station mappings configured: ${JSON.stringify(stationMapping)}`);
 });
 
