@@ -1,2 +1,2 @@
 PORT=8121
-TORQUE_DATA_PATH=/mnt/torque_wrench/DATA-28mar
+TORQUE_DATA_PATH=/mnt/torque_wrench

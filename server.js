@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 8121;
 
 // Base data paths configuration (supports single path or comma-separated list in TORQUE_DATA_PATH)
 function getBaseDataPaths() {
-  const envPaths = process.env.TORQUE_DATA_PATH || process.env.BASE_PATH || '/mnt/torque_wrench/DATA-28mar';
+  const envPaths = process.env.TORQUE_DATA_PATH || process.env.BASE_PATH || '/mnt/torque_wrench';
   return envPaths.split(',').map(p => p.trim()).filter(Boolean);
 }
 
@@ -42,15 +42,25 @@ const stationMapping = {
   'Cam housing sub assy': ['5', '6', '7', '8']
 };
 
-function getStationFolders(station) {
-  if (stationMapping[station]) {
+function getStationFolders(station, folder) {
+  if (folder) {
+    const folders = Array.isArray(folder) ? folder : folder.toString().split(',');
+    return folders.map(f => padStationNumber(f.trim()));
+  }
+  if (station && stationMapping[station]) {
     return stationMapping[station].map(folder => padStationNumber(folder));
+  }
+  // Dynamic fallback: if station itself is a numeric folder number
+  if (station && /^\d+$/.test(station.toString())) {
+    return [padStationNumber(station.toString())];
   }
   return [];
 }
 
-function isValidStation(station) {
-  return Object.prototype.hasOwnProperty.call(stationMapping, station);
+function isValidStation(station, folder) {
+  if (folder) return true;
+  if (!station) return false;
+  return Object.prototype.hasOwnProperty.call(stationMapping, station) || /^\d+$/.test(station.toString());
 }
 
 function padStationNumber(station) {
@@ -153,21 +163,21 @@ async function pathExists(p) {
 
 app.get('/api/torque-data', async (req, res) => {
   try {
-    const { station, date, time } = req.query;
+    const { station, date, time, folder } = req.query;
     
-    if (!station || !date) {
+    if ((!station && !folder) || !date) {
       return res.status(400).json({
-        error: 'Missing required parameters. Please provide both station and date.'
+        error: 'Missing required parameters. Please provide both station/folder and date.'
       });
     }
     
-    if (!isValidStation(station)) {
+    if (!isValidStation(station, folder)) {
       return res.status(404).json({
         error: `Station ${station} is not valid or has no mapped folders.`
       });
     }
     
-    const stationFolders = getStationFolders(station);
+    const stationFolders = getStationFolders(station, folder);
     let combinedData = [];
     let foundData = false;
     let fileInfo = null;
@@ -260,21 +270,21 @@ app.get('/api/stations', (req, res) => {
 
 app.get('/api/dates', async (req, res) => {
   try {
-    const { station } = req.query;
+    const { station, folder } = req.query;
     
-    if (!station) {
+    if (!station && !folder) {
       return res.status(400).json({
-        error: 'Missing required parameter: station'
+        error: 'Missing required parameter: station or folder'
       });
     }
     
-    if (!isValidStation(station)) {
+    if (!isValidStation(station, folder)) {
       return res.status(404).json({
         error: `Station ${station} is not valid or has no mapped folders.`
       });
     }
   
-    const stationFolders = getStationFolders(station);
+    const stationFolders = getStationFolders(station, folder);
     let allDates = [];
     let foundFolder = false;
     const baseDataPaths = getBaseDataPaths();
@@ -318,21 +328,21 @@ app.get('/api/dates', async (req, res) => {
 
 app.get('/api/timestamps', async (req, res) => {
   try {
-    const { station, date } = req.query;
+    const { station, date, folder } = req.query;
     
-    if (!station || !date) {
+    if ((!station && !folder) || !date) {
       return res.status(400).json({
-        error: 'Missing required parameters. Please provide both station and date.'
+        error: 'Missing required parameters. Please provide both station/folder and date.'
       });
     }
     
-    if (!isValidStation(station)) {
+    if (!isValidStation(station, folder)) {
       return res.status(404).json({
         error: `Station ${station} is not valid or has no mapped folders.`
       });
     }
     
-    const stationFolders = getStationFolders(station);
+    const stationFolders = getStationFolders(station, folder);
     let allTimestamps = [];
     let foundFile = null;
     let foundData = false;
