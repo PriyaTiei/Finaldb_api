@@ -40,12 +40,12 @@ async function getBaseDataPaths() {
     // 1. Include root directory directly (for flat directory structures)
     discoveredPaths.push(rootPath);
 
-    // 2. Discover any subdirectories (e.g. DATA-05-05-2025, DATA-28mar, DATA)
+    // 2. Discover ALL subdirectories (DATA-*, Backup, Live, etc.)
     try {
       if (await pathExists(rootPath)) {
         const entries = await fsp.readdir(rootPath, { withFileTypes: true });
         for (const entry of entries) {
-          if (entry.isDirectory() && entry.name.toUpperCase().startsWith('DATA')) {
+          if (entry.isDirectory() && !entry.name.startsWith('.') && !entry.name.startsWith('$')) {
             discoveredPaths.push(path.join(rootPath, entry.name));
           }
         }
