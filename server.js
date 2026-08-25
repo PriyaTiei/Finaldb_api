@@ -118,10 +118,13 @@ const fileCache = new Map();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_CACHE_ENTRIES = 300;
 
-async function parseCustomCSV(filePath, folderNumber) {
+async function parseCustomCSV(filePath, folderNumber, filterWindow) {
   try {
     const stats = await fsp.stat(filePath);
-    const cached = fileCache.get(filePath);
+    const cacheKey = filterWindow 
+      ? `${filePath}_${filterWindow.safeStartMs}_${filterWindow.safeEndMs}`
+      : filePath;
+    const cached = fileCache.get(cacheKey);
 
     if (cached && cached.mtimeMs === stats.mtimeMs && (Date.now() - cached.cachedAt < CACHE_TTL_MS)) {
       return cached.data;
@@ -137,6 +140,8 @@ async function parseCustomCSV(filePath, folderNumber) {
         }
       };
       let lineCounter = 0;
+      let tightIdx = -1;
+      let receptIdx = -1;
       
       createReadStream(filePath)
         .pipe(parse({
@@ -159,9 +164,25 @@ async function parseCustomCSV(filePath, folderNumber) {
           }
           if (lineCounter === 4) {
             headers = row.map(h => h.replace(/"/g, ''));
+            tightIdx = headers.indexOf('Tightening date/time');
+            receptIdx = headers.indexOf('Reception date/time');
             return;
           }
           if (lineCounter > 4) {
+            // Stream-level window filtering: skip object allocation for lines outside window
+            if (filterWindow) {
+              const tsVal = (tightIdx !== -1 ? row[tightIdx] : null) || (receptIdx !== -1 ? row[receptIdx] : null);
+              if (tsVal) {
+                const cleanTs = tsVal.replace(/"/g, '').trim().replace(/\//g, '-');
+                const rowMs = Date.parse(cleanTs);
+                if (!isNaN(rowMs)) {
+                  if (rowMs < filterWindow.safeStartMs || rowMs > filterWindow.safeEndMs) {
+                    return; // Skip line immediately without creating JS object
+                  }
+                }
+              }
+            }
+
             const rowData = {};
             headers.forEach((header, index) => {
               rowData[header] = row[index]?.replace(/"/g, '') || '';
@@ -186,7 +207,7 @@ async function parseCustomCSV(filePath, folderNumber) {
       fileCache.delete(oldestKey);
     }
 
-    fileCache.set(filePath, {
+    fileCache.set(cacheKey, {
       mtimeMs: stats.mtimeMs,
       cachedAt: Date.now(),
       data: parsedResult
@@ -200,7 +221,7 @@ async function parseCustomCSV(filePath, folderNumber) {
 
 app.get('/api/torque-data', async (req, res) => {
   try {
-    const { station, date, time, folder } = req.query;
+    const { station, date, time, folder, startTime, nextTime, endTime } = req.query;
     
     if ((!station && !folder) || !date) {
       return res.status(400).json({
@@ -212,6 +233,22 @@ app.get('/api/torque-data', async (req, res) => {
       return res.status(404).json({
         error: `Station ${station} is not valid or has no mapped folders.`
       });
+    }
+
+    // Compute safe stream filter window if startTime is provided (±5 minute safety buffer)
+    let filterWindow = null;
+    if (startTime) {
+      const startMs = new Date(decodeURIComponent(startTime)).getTime();
+      if (!isNaN(startMs)) {
+        const endTargetMs = (nextTime || endTime) 
+          ? new Date(decodeURIComponent(nextTime || endTime)).getTime() 
+          : (startMs + 150 * 1000);
+        const endMs = isNaN(endTargetMs) ? (startMs + 150 * 1000) : endTargetMs;
+        filterWindow = {
+          safeStartMs: startMs - 5 * 60 * 1000,
+          safeEndMs: endMs + 5 * 60 * 1000
+        };
+      }
     }
     
     const stationFolders = getStationFolders(station, folder);
@@ -238,7 +275,7 @@ app.get('/api/torque-data', async (req, res) => {
         
         for (const fDataFile of fDataFiles) {
           const csvFilePath = path.join(basePath, fDataFile);
-          const parsedData = await parseCustomCSV(csvFilePath, folderNumber);
+          const parsedData = await parseCustomCSV(csvFilePath, folderNumber, filterWindow);
           
           if (!fileInfo) {
             fileInfo = parsedData.fileInfo;
@@ -453,12 +490,10 @@ app.get('/health', async (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Finaldb Uryu Torque API running on port ${PORT}`);
   const initialPaths = await getBaseDataPaths();
   console.log(`Base data paths configured: ${JSON.stringify(initialPaths)}`);
   console.log(`Station mappings configured: ${JSON.stringify(stationMapping)}`);
 });
 
-
-
-
+module.exports = app;
